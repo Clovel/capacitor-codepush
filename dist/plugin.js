@@ -1370,18 +1370,17 @@ var capacitorPlugin = (function (exports, acquisitionSdk, filesystem, core, http
                 const queryUpdate = () => __awaiter$5(this, void 0, void 0, function* () {
                     try {
                         const acquisitionManager = yield Sdk.getAcquisitionManager(deploymentKey);
-                        LocalPackage.getCurrentOrDefaultPackage().then((localPackage) => __awaiter$5(this, void 0, void 0, function* () {
-                            try {
-                                const currentBinaryVersion = yield NativeAppInfo.getApplicationVersion();
-                                localPackage.appVersion = currentBinaryVersion;
-                            }
-                            catch (e) {
-                            }
-                            CodePushUtil.logMessage("Checking for update.");
-                            acquisitionManager.queryUpdateWithCurrentPackage(localPackage, callback);
-                        }), (error) => {
-                            CodePushUtil.invokeErrorCallback(error, queryError);
-                        });
+                        const localPackage = yield LocalPackage.getCurrentOrDefaultPackage();
+                        try {
+                            const currentBinaryVersion = yield NativeAppInfo.getApplicationVersion();
+                            localPackage.appVersion = currentBinaryVersion;
+                        }
+                        catch (e) {
+                            /* Nothing to do */
+                            /* TODO : Why ? */
+                        }
+                        CodePushUtil.logMessage("Checking for update.");
+                        acquisitionManager.queryUpdateWithCurrentPackage(localPackage, callback);
                     }
                     catch (e) {
                         CodePushUtil.invokeErrorCallback(e, queryError);
@@ -1391,10 +1390,11 @@ var capacitorPlugin = (function (exports, acquisitionSdk, filesystem, core, http
                     queryUpdate();
                 }
                 else {
-                    NativeAppInfo.getDeploymentKey().then(defaultDeploymentKey => {
+                    NativeAppInfo.getDeploymentKey()
+                        .then((defaultDeploymentKey) => {
                         deploymentKey = defaultDeploymentKey;
                         queryUpdate();
-                    }, deploymentKeyError => {
+                    }, (deploymentKeyError) => {
                         CodePushUtil.invokeErrorCallback(deploymentKeyError, queryError);
                     });
                 }
@@ -1438,6 +1438,7 @@ var capacitorPlugin = (function (exports, acquisitionSdk, filesystem, core, http
                     const syncCallbackAndUpdateSyncInProgress = (err, result) => {
                         if (err) {
                             syncOptions.onSyncError && syncOptions.onSyncError(err);
+                            CodePush$1.SyncInProgress = false;
                             reject(err);
                         }
                         else {
@@ -1527,55 +1528,58 @@ var capacitorPlugin = (function (exports, acquisitionSdk, filesystem, core, http
                 remotePackage.download(downloadProgress).then(onDownloadSuccess, onError);
             };
             const onUpdate = (remotePackage) => __awaiter$5(this, void 0, void 0, function* () {
-                const updateShouldBeIgnored = remotePackage && (remotePackage.failedInstall && syncOptions.ignoreFailedUpdates);
-                if (updateShouldBeIgnored) {
-                    if (updateShouldBeIgnored) {
-                        CodePushUtil.logMessage("An update is available, but it is being ignored due to have been previously rolled back.");
-                    }
+                if (remotePackage === null) {
+                    /* Then the app is up to date */
                     syncCallback && syncCallback(null, SyncStatus.UP_TO_DATE);
                 }
                 else {
-                    const dlgOpts = syncOptions.updateDialog;
-                    if (dlgOpts) {
-                        CodePushUtil.logMessage("Awaiting user action.");
-                        syncCallback && syncCallback(null, SyncStatus.AWAITING_USER_ACTION);
-                    }
-                    if (remotePackage.isMandatory && syncOptions.updateDialog) {
-                        /* Alert user */
-                        const message = dlgOpts.appendReleaseDescription ?
-                            dlgOpts.mandatoryUpdateMessage + dlgOpts.descriptionPrefix + remotePackage.description
-                            : dlgOpts.mandatoryUpdateMessage;
-                        yield dialog.Dialog.alert({
-                            message,
-                            title: dlgOpts.updateTitle,
-                            buttonTitle: dlgOpts.mandatoryContinueButtonLabel
-                        });
-                        downloadAndInstallUpdate(remotePackage);
-                    }
-                    else if (!remotePackage.isMandatory && syncOptions.updateDialog) {
-                        /* Confirm update with user */
-                        const message = dlgOpts.appendReleaseDescription ?
-                            dlgOpts.optionalUpdateMessage + dlgOpts.descriptionPrefix + remotePackage.description
-                            : dlgOpts.optionalUpdateMessage;
-                        const confirmResult = yield dialog.Dialog.confirm({
-                            message,
-                            title: dlgOpts.updateTitle,
-                            okButtonTitle: dlgOpts.optionalInstallButtonLabel,
-                            cancelButtonTitle: dlgOpts.optionalIgnoreButtonLabel
-                        });
-                        if (confirmResult.value) {
-                            /* Install */
-                            downloadAndInstallUpdate(remotePackage);
-                        }
-                        else {
-                            /* Cancel */
-                            CodePushUtil.logMessage("User cancelled the update.");
-                            syncCallback && syncCallback(null, SyncStatus.UPDATE_IGNORED);
-                        }
+                    if (remotePackage.failedInstall && syncOptions.ignoreFailedUpdates) {
+                        CodePushUtil.logMessage("An update is available, but it is being ignored due to have been previously rolled back.");
+                        syncCallback && syncCallback(null, SyncStatus.UPDATE_IGNORED);
                     }
                     else {
-                        /* No user interaction */
-                        downloadAndInstallUpdate(remotePackage);
+                        if (syncOptions.updateDialog) {
+                            CodePushUtil.logMessage("Awaiting user action.");
+                            syncCallback && syncCallback(null, SyncStatus.AWAITING_USER_ACTION);
+                            const dlgOpts = syncOptions.updateDialog;
+                            if (remotePackage.isMandatory) {
+                                /* Alert user */
+                                const message = dlgOpts.appendReleaseDescription ?
+                                    dlgOpts.mandatoryUpdateMessage + dlgOpts.descriptionPrefix + remotePackage.description :
+                                    dlgOpts.mandatoryUpdateMessage;
+                                yield dialog.Dialog.alert({
+                                    message,
+                                    title: dlgOpts.updateTitle,
+                                    buttonTitle: dlgOpts.mandatoryContinueButtonLabel
+                                });
+                                downloadAndInstallUpdate(remotePackage);
+                            }
+                            else {
+                                /* Confirm update with user */
+                                const message = dlgOpts.appendReleaseDescription ?
+                                    dlgOpts.optionalUpdateMessage + dlgOpts.descriptionPrefix + remotePackage.description
+                                    : dlgOpts.optionalUpdateMessage;
+                                const confirmResult = yield dialog.Dialog.confirm({
+                                    message,
+                                    title: dlgOpts.updateTitle,
+                                    okButtonTitle: dlgOpts.optionalInstallButtonLabel,
+                                    cancelButtonTitle: dlgOpts.optionalIgnoreButtonLabel
+                                });
+                                if (confirmResult.value === true) {
+                                    /* Install */
+                                    downloadAndInstallUpdate(remotePackage);
+                                }
+                                else {
+                                    /* Cancel */
+                                    CodePushUtil.logMessage("User cancelled the update.");
+                                    syncCallback && syncCallback(null, SyncStatus.UPDATE_IGNORED);
+                                }
+                            }
+                        }
+                        else {
+                            /* No user interaction */
+                            downloadAndInstallUpdate(remotePackage);
+                        }
                     }
                 }
             });
